@@ -40,7 +40,7 @@ st.write(data.tail())
 
 # بررسی نوع داده‌ها برای اطمینان
 st.write("📊 Data types:")
-st.write(data.dtypes)
+# st.write(data.dtypes)
 
 
 # ---------- رسم نمودار ----------
