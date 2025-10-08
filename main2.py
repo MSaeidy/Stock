@@ -1,106 +1,90 @@
 import streamlit as st
+import yfinance as yf
 from datetime import date
 import pandas as pd
-import yfinance as yf
 from prophet import Prophet
 from prophet.plot import plot_plotly
 from plotly import graph_objs as go
 
 
-# ---------- تنظیمات اولیه ----------
-START = "2015-01-01"
-TODAY = date.today().strftime("%Y-%m-%d")
+st.title("Stock Price Viewer — (5 years)")
 
-st.title("📈 Stock Prediction App")
+stocks = (
+    "NVDA","MSFT","AAPL","AMZN","META","AVGO","GOOGL","TSLA","GOOG","BRK.B",
+    "JPM","ORCL","WMT","LLY","V","MA","NFLX","XOM","JNJ","PLTR",
+    "ABBV","COST","HD","AMD","BAC","PG","UNH","GE","CVX","KO",
+    "CSCO","IBM","WFC","TMUS","MS","PM","GS","AMGN","ACN","TJX",
+    "APH","SPGI","DHR","NEE","AMT","RTX","MCD","UBER","SHOP","CAT",
+    "ICE","NDAQ"
+)
 
-stocks = ("AAPL", "GOOG", "MSFT", "GME")
-selected_stock = st.selectbox("Select dataset for prediction", stocks)
+ticker_symbol = st.selectbox("Select dataset for prediction", stocks)
 
-n_years = st.slider("Years of prediction:", 1, 4)
+n_years = st.slider("Years of prediction: ", 1 , 4)
 period = n_years * 365
 
-
-# ---------- بارگذاری داده ----------
-@st.cache_data
+#  --- loading ---
 def load_data(ticker):
-    # auto_adjust=False برای حفظ ساختار استاندارد داده‌ها
-    data = yf.download(ticker, START, TODAY, auto_adjust=False)
-    data.reset_index(inplace=True)
-    # اطمینان از اینکه ستون تاریخ از نوع datetime است
-    data['Date'] = pd.to_datetime(data['Date']).dt.floor('d')
-    return data
+    if ticker:
+        ticker_data = yf.Ticker(ticker)
+        try:
+            # فقط period — هیچ start یا end ای تعیین نشده
+            data = ticker_data.history(period='5y')  # مثلا 5 سال اخیر
+            # data['Date'] = pd.to_datetime(data['Date']).dt.floor('d')
+            return data
+            
+        except Exception as e:
+            st.error(f"An error occurred: {e}")
+    else:
+        st.info("Please enter a valid symbol")
+
+data =load_data(ticker_symbol)
+
+# --- chart ---
+def c_chart(TDF):
+    if not TDF.empty:
+        st.subheader("Closing Price")
+        st.line_chart(TDF['Close'])
+
+        st.subheader("Volume")
+        st.line_chart(TDF['Volume'])
+    else:
+        st.warning("No historical data available for this symbol / period.")
 
 
-data_load_state = st.text("Loading data...")
-data = load_data(selected_stock)
-data_load_state.text("✅ Data loaded successfully!")
-
-st.subheader("Raw data (last 5 rows)")
-st.write(data.tail())
-
-# بررسی نوع داده‌ها برای اطمینان
-st.write("📊 Data types:")
-# st.write(data.dtypes)
+c_chart(data)
 
 
-# ---------- رسم نمودار ----------
 def plot_raw_data():
     fig = go.Figure()
-    fig.add_trace(go.Scatter(x=data['Date'], y=data['Open'], name='Stock Open'))
-    fig.add_trace(go.Scatter(x=data['Date'], y=data['Close'], name='Stock Close'))
-    fig.update_layout(
-        title_text="Time Series Data",
-        xaxis_rangeslider_visible=True,
-        template="plotly_white"
-    )
+    fig.add_trace(go.Scatter(x=data.index,y=data['Open'],name='Stock Open'))
+    fig.add_trace(go.Scatter(x=data.index,y=data['Close'],name='Stock Close'))
+    fig.update_layout(title_text = "Time Series Data" , xaxis_rangeslider_visible = True , )
     st.plotly_chart(fig)
 
+plot_raw_data()    
 
-if not data.empty:
-    plot_raw_data()
-else:
-    st.error("⚠️ No data loaded! Please check your internet or ticker symbol.")
+st.subheader("Raw data ")
+st.write(data.tail())
 
+# --- ready to prophet ---
+df_train = data.reset_index()[['Date','Close']]
+df_train['Date'] = df_train['Date'].dt.tz_localize(None)
+df_train = df_train.rename(columns={"Date":"ds","Close":"y"})
 
-# ---------- آماده‌سازی داده برای Prophet ----------
-df_train = data[['Date', 'Close']].copy()
-
-# اطمینان از اینکه مقدار Close عددی است
-df_train['Close'] = pd.to_numeric(df_train['Close'], errors='coerce')
-
-# حذف مقادیر خالی
-df_train = df_train.dropna(subset=['Close'])
-
-# تغییر نام برای Prophet
-df_train = df_train.rename(columns={"Date": "ds", "Close": "y"})
-
-# اطمینان از نوع داده‌ها
-df_train['ds'] = pd.to_datetime(df_train['ds'])
-df_train['y'] = df_train['y'].astype(float)
-
-# نمایش چک اولیه
-st.write("✅ Prophet input sample:")
-st.write(df_train.head())
-st.write(df_train.dtypes)
-
-
-# ---------- پیش‌بینی ----------
 m = Prophet()
 m.fit(df_train)
 
 future = m.make_future_dataframe(periods=period)
 forecast = m.predict(future)
 
-# ---------- نمایش داده‌های پیش‌بینی ----------
-st.subheader("Forecast data (last 5 rows)")
+st.subheader("Forecast data")
 st.write(forecast.tail())
 
-# ---------- نمودار پیش‌بینی ----------
-st.subheader("Forecast chart")
-fig2 = plot_plotly(m, forecast)
+st.subheader("Forecast Chart")
+fig2 = plot_plotly(m,forecast)
 st.plotly_chart(fig2)
 
-# ---------- اجزای پیش‌بینی (ترند و فصلی) ----------
-st.subheader("Forecast components")
+st.subheader("Forecast Components")
 fig3 = m.plot_components(forecast)
 st.write(fig3)
